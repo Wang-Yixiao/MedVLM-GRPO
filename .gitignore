@@ -1,5 +1,6 @@
 # Python cache
 __pycache__/
+*.egg-info/
 *.pyc
 *.pyo
 *.pyd
@@ -20,6 +21,9 @@ runs/
 wandb/
 
 # Model weights / checkpoints
+model/
+models/
+reward_model/
 *.pt
 *.pth
 *.bin
@@ -39,3 +43,8 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+.pytest_cache/
+
+# Local scratch notes
+/test.txt
+/gemex_image_filenames.txt

@@ -1,0 +1,13 @@
+name: medvlm-dapo
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pytorch>=2.5
+  - torchvision
+  - pytorch-cuda=12.4
+  - pip:
+      - -r requirements.txt

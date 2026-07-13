@@ -1,0 +1,386 @@
+{
+  "root": "D:\\GRPO_new\\data",
+  "datasets": {
+    "VQA-RAD": {
+      "splits": {
+        "test": {
+          "rows": 451,
+          "unique_images": 203,
+          "unique_questions": 430,
+          "duplicate_qa_rows": 14,
+          "yes_no_percent": 55.65,
+          "top_answers": [
+            [
+              "no",
+              133
+            ],
+            [
+              "yes",
+              118
+            ],
+            [
+              "axial",
+              12
+            ],
+            [
+              "right",
+              6
+            ],
+            [
+              "left",
+              6
+            ],
+            [
+              "brain",
+              5
+            ],
+            [
+              "right upper lobe",
+              4
+            ],
+            [
+              "mri",
+              4
+            ],
+            [
+              "female",
+              4
+            ],
+            [
+              "right side",
+              3
+            ]
+          ]
+        },
+        "train": {
+          "rows": 1793,
+          "unique_images": 313,
+          "unique_questions": 1583,
+          "duplicate_qa_rows": 102,
+          "yes_no_percent": 52.43,
+          "top_answers": [
+            [
+              "no",
+              473
+            ],
+            [
+              "yes",
+              467
+            ],
+            [
+              "axial",
+              31
+            ],
+            [
+              "right",
+              20
+            ],
+            [
+              "pa",
+              14
+            ],
+            [
+              "left",
+              13
+            ],
+            [
+              "ct",
+              10
+            ],
+            [
+              "brain",
+              8
+            ],
+            [
+              "x-ray",
+              7
+            ],
+            [
+              "with contrast",
+              7
+            ]
+          ]
+        }
+      },
+      "overlap": {
+        "test_vs_train": {
+          "exact_images": 202,
+          "question_answers": 42
+        }
+      }
+    },
+    "SLAKE": {
+      "splits": {
+        "test": {
+          "rows": 1061,
+          "unique_images": 96,
+          "unique_questions": 319,
+          "duplicate_qa_rows": 572,
+          "yes_no_percent": 33.46,
+          "top_answers": [
+            [
+              "no",
+              180
+            ],
+            [
+              "yes",
+              175
+            ],
+            [
+              "chest",
+              53
+            ],
+            [
+              "lung",
+              51
+            ],
+            [
+              "liver",
+              35
+            ],
+            [
+              "2",
+              26
+            ],
+            [
+              "ct",
+              23
+            ],
+            [
+              "head",
+              23
+            ],
+            [
+              "x-ray",
+              22
+            ],
+            [
+              "black",
+              20
+            ]
+          ]
+        },
+        "train": {
+          "rows": 4919,
+          "unique_images": 450,
+          "unique_questions": 597,
+          "duplicate_qa_rows": 3890,
+          "yes_no_percent": 34.19,
+          "top_answers": [
+            [
+              "yes",
+              864
+            ],
+            [
+              "no",
+              818
+            ],
+            [
+              "lung",
+              253
+            ],
+            [
+              "chest",
+              220
+            ],
+            [
+              "liver",
+              159
+            ],
+            [
+              "head",
+              129
+            ],
+            [
+              "ct",
+              126
+            ],
+            [
+              "brain",
+              117
+            ],
+            [
+              "2",
+              109
+            ],
+            [
+              "abdomen",
+              103
+            ]
+          ]
+        },
+        "validation": {
+          "rows": 1053,
+          "unique_images": 96,
+          "unique_questions": 318,
+          "duplicate_qa_rows": 581,
+          "yes_no_percent": 34.0,
+          "top_answers": [
+            [
+              "yes",
+              182
+            ],
+            [
+              "no",
+              176
+            ],
+            [
+              "chest",
+              55
+            ],
+            [
+              "lung",
+              47
+            ],
+            [
+              "2",
+              27
+            ],
+            [
+              "heart",
+              27
+            ],
+            [
+              "head",
+              25
+            ],
+            [
+              "liver",
+              23
+            ],
+            [
+              "ct",
+              22
+            ],
+            [
+              "mri",
+              21
+            ]
+          ]
+        }
+      },
+      "overlap": {
+        "test_vs_train": {
+          "exact_images": 0,
+          "question_answers": 369
+        },
+        "test_vs_validation": {
+          "exact_images": 0,
+          "question_answers": 247
+        },
+        "train_vs_validation": {
+          "exact_images": 0,
+          "question_answers": 383
+        }
+      }
+    },
+    "Agupte": {
+      "splits": {
+        "test": {
+          "rows": 159,
+          "unique_images": 29,
+          "unique_questions": 153,
+          "duplicate_qa_rows": 4,
+          "yes_no_percent": 62.26,
+          "top_answers": [
+            [
+              "yes",
+              51
+            ],
+            [
+              "no",
+              48
+            ],
+            [
+              "left",
+              5
+            ],
+            [
+              "right upper lobe",
+              3
+            ],
+            [
+              "right lung",
+              3
+            ],
+            [
+              "middle mogul",
+              3
+            ],
+            [
+              "right",
+              2
+            ],
+            [
+              "7th rib",
+              2
+            ],
+            [
+              "right lower lobe",
+              2
+            ],
+            [
+              "right side",
+              2
+            ]
+          ]
+        },
+        "train": {
+          "rows": 635,
+          "unique_images": 104,
+          "unique_questions": 531,
+          "duplicate_qa_rows": 73,
+          "yes_no_percent": 59.53,
+          "top_answers": [
+            [
+              "no",
+              243
+            ],
+            [
+              "yes",
+              135
+            ],
+            [
+              "pa",
+              13
+            ],
+            [
+              "right",
+              12
+            ],
+            [
+              "x-ray",
+              7
+            ],
+            [
+              "right sided pleural effusion",
+              6
+            ],
+            [
+              "female",
+              6
+            ],
+            [
+              "left",
+              5
+            ],
+            [
+              "right side",
+              5
+            ],
+            [
+              "right lung",
+              4
+            ]
+          ]
+        }
+      },
+      "overlap": {
+        "test_vs_train": {
+          "exact_images": 26,
+          "question_answers": 7
+        }
+      }
+    }
+  }
+}

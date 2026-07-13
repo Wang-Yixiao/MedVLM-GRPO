@@ -1,0 +1,28 @@
+{
+  "overall": {
+    "count": 451,
+    "exact_match": 0.45454545454545453,
+    "rougeL": 0.4886451624256502,
+    "meteor": 0.25162045096322827,
+    "bertscore_precision": 0.9769614691744887,
+    "bertscore_recall": 0.9771698615503417,
+    "bertscore_f1": 0.9767555405453938,
+    "clinical_contradiction_rate": 0.21507760532150777,
+    "polarity_contradictions": 90,
+    "laterality_contradictions": 7
+  },
+  "by_question_type": {
+    "closed": {
+      "count": 316,
+      "exact_match": 0.5727848101265823,
+      "rougeL": 0.5862341772151898,
+      "clinical_contradiction_rate": 0.2974683544303797
+    },
+    "open": {
+      "count": 135,
+      "exact_match": 0.17777777777777778,
+      "rougeL": 0.25666479610924053,
+      "clinical_contradiction_rate": 0.022222222222222223
+    }
+  }
+}
