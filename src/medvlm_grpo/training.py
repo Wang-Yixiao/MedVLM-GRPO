@@ -1,3 +1,5 @@
+from inspect import signature
+
 from peft import LoraConfig
 from transformers import TrainerCallback
 from trl import GRPOConfig, SFTConfig
@@ -53,7 +55,6 @@ def make_rl_config(args, output_dir, dapo=False):
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_generations=args.num_generations,
-        max_prompt_length=args.max_prompt_length,
         max_completion_length=args.max_completion_length,
         num_train_epochs=1,
         save_steps=100,
@@ -64,6 +65,10 @@ def make_rl_config(args, output_dir, dapo=False):
         remove_unused_columns=False,
         gradient_checkpointing=args.gradient_checkpointing,
     )
+    # TRL <=0.28 exposed max_prompt_length on GRPOConfig; TRL 0.29 removed it.
+    # Keep compatibility with both without passing an unknown dataclass field.
+    if "max_prompt_length" in signature(GRPOConfig).parameters:
+        common["max_prompt_length"] = args.max_prompt_length
     if dapo:
         common.update(
             # DAPO: token-level normalization and decoupled asymmetric clipping.
