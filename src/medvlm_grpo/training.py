@@ -2,6 +2,8 @@ from peft import LoraConfig
 from transformers import TrainerCallback
 from trl import GRPOConfig, SFTConfig
 
+from .precision import precision_kwargs
+
 
 def make_lora_config():
     return LoraConfig(
@@ -15,6 +17,7 @@ def make_lora_config():
 
 
 def make_sft_config(args, output_dir):
+    mixed_precision = precision_kwargs(args.precision)
     return SFTConfig(
         output_dir=output_dir,
         learning_rate=5e-5,
@@ -24,8 +27,7 @@ def make_sft_config(args, output_dir):
         warmup_ratio=0.1,
         weight_decay=0.1,
         logging_steps=1,
-        fp16=True,
-        bf16=False,
+        **mixed_precision,
         lr_scheduler_type="cosine",
         save_steps=200,
         report_to="none",
@@ -37,6 +39,7 @@ def make_sft_config(args, output_dir):
 
 
 def make_rl_config(args, output_dir, dapo=False):
+    mixed_precision = precision_kwargs(args.precision)
     common = dict(
         output_dir=output_dir,
         learning_rate=5e-6,
@@ -46,8 +49,7 @@ def make_rl_config(args, output_dir, dapo=False):
         warmup_ratio=0.1,
         lr_scheduler_type="cosine",
         logging_steps=1,
-        fp16=True,
-        bf16=False,
+        **mixed_precision,
         per_device_train_batch_size=args.per_device_train_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_generations=args.num_generations,

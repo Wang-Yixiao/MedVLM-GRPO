@@ -1,5 +1,8 @@
+from collections import Counter
 from functools import partial
 import hashlib
+import re
+import warnings
 
 from pathlib import Path
 
@@ -8,9 +11,19 @@ from datasets import Dataset, DatasetDict, Image, concatenate_datasets, load_dat
 
 SYSTEM_PROMPT = """You are a medical visual question-answering assistant. Inspect the image and answer the question accurately and concisely. Return exactly: <think>brief clinically grounded rationale</think><answer>final answer only</answer>. Do not invent findings that are not visible in the image."""
 
+TAGGED_REASONING_RE = re.compile(
+    r"^\s*<think>.+?</think>\s*<answer>.+?</answer>\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 def _image(example):
-    return example.get("image", example.get("images"))
+    # Do not use example.get("image", example.get("images")) here: Python
+    # evaluates the default argument eagerly, which can make datasets decode an
+    # unused fallback column (or fail while looking it up).
+    if "image" in example:
+        return example["image"]
+    return example.get("images")
 
 
 def _normalize(example, question_col, answer_col):
@@ -19,7 +32,9 @@ def _normalize(example, question_col, answer_col):
     answer = ", ".join(map(str, raw_answer)) if isinstance(raw_answer, list) else str(raw_answer)
     answer = answer.strip()
     reasoning = str(example.get("reasoning", example.get("reason", "Review the relevant visible medical finding."))).strip()
-    completion = answer if "<answer>" in answer else f"<think>{reasoning}</think><answer>{answer}</answer>"
+    # OpenMedReason already stores a complete tagged target. Re-wrapping it
+    # would create nested <think>/<answer> tags and teach an invalid format.
+    completion = reasoning if TAGGED_REASONING_RE.match(reasoning) else f"<think>{reasoning}</think><answer>{answer}</answer>"
     # Keep the heavy image in one top-level column. The chat template only needs
     # an image placeholder; duplicating PIL bytes inside messages is extremely slow.
     user_content = []
@@ -42,9 +57,10 @@ DATASETS = {
 }
 
 RECIPE_PATHS = {
+    "openmedreason": Path("/root/autodl-tmp/datasets/neginb/OpenMedReason"),
     "gemex": Path("data/BoKelvin/GEMeX-VQA"),
-    "slake": Path("data/mdwiratathya/SLAKE-vqa-english"),
-    "agupte": Path("data/agupte/MedVQA"),
+    "slake": Path("/root/autodl-tmp/datasets/mdwiratathya/SLAKE-vqa-english"),
+    "agupte": Path("/root/autodl-tmp/datasets/agupte/MedVQA"),
 }
 
 
@@ -82,39 +98,154 @@ def load_gemex_vqa(path=RECIPE_PATHS["gemex"], image_root=None):
     return concatenate_datasets(datasets)
 
 
-def load_experiment_datasets(
-    gemex_path=RECIPE_PATHS["gemex"],
-    slake_path=RECIPE_PATHS["slake"],
-    agupte_path=RECIPE_PATHS["agupte"],
-    gemex_image_root=None,
-    test_size=10,
-):
-    """Return (cold start, mixed train, train validation, image-unique unseen test)."""
-    gemex = load_gemex_vqa(gemex_path, image_root=gemex_image_root)
-    slake = load_dataset(str(slake_path))
-    slake_train = _format_dataset(slake["train"], "question", "answer", "Formatting SLAKE/train")
-    slake_validation = _format_dataset(slake["validation"], "question", "answer", "Formatting SLAKE/validation")
-    train = concatenate_datasets([gemex, slake_train])
+def _encoded_image_digest(image):
+    """Hash an Image(decode=False) value without decoding it into pixels."""
+    if isinstance(image, dict):
+        payload = image.get("bytes")
+        if payload is not None:
+            return hashlib.sha256(payload).hexdigest()
+        path = image.get("path")
+        if path:
+            return hashlib.sha256(str(path).encode("utf-8")).hexdigest()
+    raise ValueError("OpenMedReason image has neither encoded bytes nor a path")
 
-    agupte = load_dataset(str(agupte_path), split="test")
-    # One question per image prevents paraphrases about the same image from
-    # inflating an evaluation computed over a small test sample.
-    selected_indices = []
-    seen_images = set()
-    for index, image_name in enumerate(agupte["image_names"]):
-        if image_name in seen_images:
-            continue
-        seen_images.add(image_name)
-        selected_indices.append(index)
-        if len(selected_indices) == test_size:
-            break
-    unseen_test = _format_dataset(
-        agupte.select(selected_indices),
-        "questions",
-        "answers",
-        "Formatting agupte unseen test",
+
+def _encoded_image_keys(dataset):
+    """Read encoded images sequentially and retain only their small digests."""
+    return [_encoded_image_digest(image) for image in dataset["image"]]
+
+
+def _encoded_image_is_decodable(image):
+    """Return whether an Image(decode=False) value can be decoded locally."""
+    if not isinstance(image, dict):
+        return False
+    if image.get("bytes") is not None:
+        return True
+    image_path = image.get("path")
+    return bool(image_path and Path(image_path).is_file())
+
+
+def _drop_missing_encoded_images(dataset, split_name):
+    """Drop rows whose image payload points at a nonexistent external file."""
+    valid_indices = [
+        index
+        for index, image in enumerate(dataset["image"])
+        if _encoded_image_is_decodable(image)
+    ]
+    dropped = len(dataset) - len(valid_indices)
+    if dropped:
+        warnings.warn(
+            f"Dropping {dropped} {split_name} row(s) with missing image bytes/files; "
+            "the source dataset contains unresolved external image paths.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return dataset.select(valid_indices)
+    return dataset
+
+
+def _valid_openmedreason(example, max_reasoning_chars):
+    question = str(example.get("question", "")).strip()
+    answer = str(example.get("answer", "")).strip()
+    reasoning = str(example.get("reasoning", "")).strip()
+    return bool(
+        question
+        and answer
+        and 40 <= len(reasoning) <= max_reasoning_chars
+        and TAGGED_REASONING_RE.match(reasoning)
     )
-    return gemex, train, slake_validation, unseen_test
+
+
+def _take_image_groups(dataset, ordered_keys, target_rows):
+    """Select whole image groups until target_rows is reached (or all for <=0)."""
+    if target_rows <= 0:
+        selected_keys = set(ordered_keys)
+    else:
+        counts = Counter(dataset["_image_key"])
+        selected_keys = set()
+        selected_rows = 0
+        for key in ordered_keys:
+            selected_keys.add(key)
+            selected_rows += counts[key]
+            if selected_rows >= target_rows:
+                break
+    selected_indices = [
+        index for index, key in enumerate(dataset["_image_key"])
+        if key in selected_keys
+    ]
+    selected = dataset.select(selected_indices)
+    remaining_keys = [key for key in ordered_keys if key not in selected_keys]
+    return selected, remaining_keys
+
+
+def load_openmedreason_splits(
+    path=RECIPE_PATHS["openmedreason"],
+    cold_start_size=10_000,
+    validation_size=1_000,
+    rl_size=30_000,
+    max_reasoning_chars=1_600,
+    seed=42,
+):
+    """Build image-disjoint SFT, validation, RL, and official-test splits.
+
+    The official test split is never used for training or split selection.
+    Passing ``rl_size <= 0`` places every remaining eligible training image in
+    the RL pool.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"OpenMedReason repository not found: {path}")
+    if cold_start_size <= 0 or validation_size <= 0:
+        raise ValueError("cold_start_size and validation_size must be positive")
+    raw = load_dataset(str(path))
+    required = {"image", "question", "reasoning", "answer"}
+    missing = required.difference(raw["train"].column_names)
+    if missing:
+        raise ValueError(f"OpenMedReason is missing columns: {sorted(missing)}")
+
+    # Hash the encoded image bytes so repeated questions for one image cannot
+    # cross SFT, validation, RL, or the official test boundary.
+    train = raw["train"].cast_column("image", Image(decode=False))
+    test = raw["test"].cast_column("image", Image(decode=False))
+    # OpenMedReason's official test currently contains a small number of rows
+    # with null image bytes and bare filenames that are not shipped alongside
+    # the parquet file. Remove those corrupt rows before Image() invokes PIL.
+    test = _drop_missing_encoded_images(test, "OpenMedReason official-test")
+    train_keys = _encoded_image_keys(train)
+    test_keys_list = _encoded_image_keys(test)
+    test_keys = set(test_keys_list)
+
+    # select() creates lightweight index views. Avoid map/filter over the full
+    # 7.5 GB dataset because those operations can materialize large cache copies.
+    text_view = train.select_columns(["question", "answer", "reasoning"])
+    valid_indices = [
+        index
+        for index, (key, example) in enumerate(zip(train_keys, text_view))
+        if key not in test_keys
+        and _valid_openmedreason(example, max_reasoning_chars=max_reasoning_chars)
+    ]
+    train = train.add_column("_image_key", train_keys).select(valid_indices)
+    test = test.add_column("_image_key", test_keys_list)
+
+    unique_keys = sorted(
+        set(train["_image_key"]),
+        key=lambda key: hashlib.sha256(f"{seed}:{key}".encode("utf-8")).hexdigest(),
+    )
+    cold_raw, unique_keys = _take_image_groups(train, unique_keys, cold_start_size)
+    validation_raw, unique_keys = _take_image_groups(train, unique_keys, validation_size)
+    rl_raw, _ = _take_image_groups(train, unique_keys, rl_size)
+
+    def format_split(split, name):
+        split = split.remove_columns(["_image_key"]).cast_column("image", Image())
+        return _format_dataset(split, "question", "answer", f"Formatting OpenMedReason/{name}")
+
+    official_test = test.remove_columns(["_image_key"]).cast_column("image", Image())
+    return (
+        format_split(cold_raw, "cold-start"),
+        format_split(validation_raw, "validation"),
+        format_split(rl_raw, "rl"),
+        _format_dataset(official_test, "question", "answer", "Formatting OpenMedReason/official-test"),
+    )
 
 CACHE_PATTERNS = {
     "Vqa_rad": "vqa-rad-*.arrow",
@@ -124,8 +255,16 @@ CACHE_PATTERNS = {
 }
 
 LOCAL_PARQUET_REPOS = {
-    "Vqa_rad": Path("data/flaviagiammarino/vqa-rad/data"),
+    "Vqa_rad": Path("/root/autodl-tmp/datasets/flaviagiammarino/vqa-rad/data"),
+    "Vqa_Agupte": Path("/root/autodl-tmp/datasets/agupte/MedVQA/data"),
+    "SLAKE_VQA_EN": Path(
+        "/root/autodl-tmp/datasets/mdwiratathya/SLAKE-vqa-english/data"
+    ),
+    "Path_VQA": Path(
+        "/root/autodl-tmp/datasets/flaviagiammarino/path-vqa/data"
+    ),
 }
+
 
 
 def _load_available(name, path):
@@ -134,7 +273,7 @@ def _load_available(name, path):
     parquet_root = LOCAL_PARQUET_REPOS.get(name)
     if parquet_root and parquet_root.exists():
         split_files = {
-            split: str(files[0])
+            split: [str(file) for file in files]
             for split in ("train", "validation", "test")
             if (files := sorted(parquet_root.glob(f"{split}-*.parquet")))
         }
@@ -192,6 +331,57 @@ def load_medical_vqa(name, strict_image_split=False):
     if strict_image_split:
         train = _remove_image_leakage(train, validation)
     return train, test if test is not None else validation, validation
+
+
+def load_mixed_rl_data(
+    openmedreason_rl,
+    dataset_names=("SLAKE_VQA_EN", "Vqa_rad", "Vqa_Agupte", "Path_VQA"),
+    per_dataset_cap=5_000,
+    strict_image_split=True,
+    seed=42,
+):
+    """Mix OpenMedReason with answer-only VQA prompts for RL.
+
+    Answer-only datasets never enter SFT; their generated rationale is learned
+    through reward while the reference answer remains the verifier target.
+    """
+    parts = [openmedreason_rl]
+    for name in dataset_names:
+        train, _, _ = load_medical_vqa(name, strict_image_split=strict_image_split)
+        if per_dataset_cap > 0 and len(train) > per_dataset_cap:
+            train = train.shuffle(seed=seed).select(range(per_dataset_cap))
+        parts.append(train)
+    return concatenate_datasets(parts).shuffle(seed=seed)
+
+
+def load_experiment_datasets(
+    openmedreason_path=RECIPE_PATHS["openmedreason"],
+    cold_start_size=10_000,
+    openmedreason_rl_size=30_000,
+    validation_size=1_000,
+    max_reasoning_chars=1_600,
+    rl_dataset_names=("SLAKE_VQA_EN", "Vqa_rad", "Vqa_Agupte", "Path_VQA"),
+    rl_per_dataset_cap=5_000,
+    strict_image_split=True,
+    seed=42,
+):
+    """Return OpenMedReason SFT, mixed RL, validation, and official test data."""
+    cold, validation, openmedreason_rl, official_test = load_openmedreason_splits(
+        path=openmedreason_path,
+        cold_start_size=cold_start_size,
+        validation_size=validation_size,
+        rl_size=openmedreason_rl_size,
+        max_reasoning_chars=max_reasoning_chars,
+        seed=seed,
+    )
+    rl_train = load_mixed_rl_data(
+        openmedreason_rl,
+        dataset_names=rl_dataset_names,
+        per_dataset_cap=rl_per_dataset_cap,
+        strict_image_split=strict_image_split,
+        seed=seed,
+    )
+    return cold, rl_train, validation, official_test
 
 
 def load_cold_start_data(path):

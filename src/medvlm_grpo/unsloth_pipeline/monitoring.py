@@ -28,11 +28,14 @@ class GRPOMetricsCallback(TrainerCallback):
         if not logs or not state.is_world_process_zero:
             return
         components = get_reward_engine().latest_summary.copy()
+        # Callback handlers receive the same log dictionary in order. Adding
+        # reward components here makes them visible to the following SwanLab
+        # callback while preserving Trainer's native GRPO metrics.
+        logs.update(components)
         record = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "step": int(state.global_step),
             **{key: value for key, value in logs.items() if isinstance(value, (int, float))},
-            **components,
         }
         with self.output_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")

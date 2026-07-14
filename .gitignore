@@ -19,11 +19,13 @@ outputs/
 checkpoints/
 runs/
 wandb/
+swanlog/
 
 # Model weights / checkpoints
 model/
 models/
 reward_model/
+/reward_model.zip
 *.pt
 *.pth
 *.bin

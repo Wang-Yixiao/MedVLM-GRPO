@@ -1,0 +1,23 @@
+# AutoDL / Linux GPU training environment.
+#
+# Do not pin torch here. autodl/setup.sh asks uv to select a wheel
+# compatible with the NVIDIA driver exposed by the AutoDL instance.
+unsloth>=2025.7.8
+vllm>=0.13.0,<0.24.0
+transformers>=4.49,<5
+trl>=0.25.0,<0.30
+datasets>=3.2
+accelerate>=1.2
+peft>=0.14
+bitsandbytes>=0.45
+qwen-vl-utils>=0.0.8
+evaluate>=0.4.3
+rouge-score>=0.1.2
+sentence-transformers>=3.0
+sacremoses>=0.1.1
+bert-score>=0.3.13
+nltk>=3.8
+pillow>=10
+pyarrow>=15
+pytest>=8
+swanlab>=0.6

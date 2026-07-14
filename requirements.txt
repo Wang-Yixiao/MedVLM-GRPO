@@ -12,3 +12,4 @@ sentence-transformers>=3.0
 sacremoses>=0.1.1
 bert-score>=0.3.13
 nltk>=3.8
+swanlab>=0.6

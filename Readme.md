@@ -12,7 +12,7 @@
 
 - 支持 SFT、GRPO、DAPO-style 及 `SFT → DAPO` 两阶段训练；
 - 支持 LoRA/QLoRA、4-bit 量化、梯度检查点、DeepSpeed、Unsloth 与 vLLM；
-- 支持 VQA-RAD、SLAKE、PathVQA、MedVQA Agupte 和 GEMeX 数据配方；
+- 支持 OpenMedReason 冷启动，以及 VQA-RAD、SLAKE、PathVQA、MedVQA Agupte 混合 RL 配方；
 - 支持按图像分组切分、跨 split 去重和数据集泄漏审计；
 - 提供单图推理、JSONL 离线评估、训练监控及消融实验脚本；
 - 当前指标包括 Exact Match 与 ROUGE-L。
@@ -83,8 +83,11 @@ python scripts/audit_datasets.py --root ./data --output reports/dataset_audit.js
 python Qwentrain.py \
   --model_id Qwen/Qwen2.5-VL-3B-Instruct \
   --stage pipeline \
-  --cold_start_data ./dataset/cold_start.jsonl \
-  --strict_image_split \
+  --openmedreason_path ./data/neginb/OpenMedReason \
+  --cold_start_size 10000 \
+  --openmedreason_rl_size 30000 \
+  --recipe_validation_size 1000 \
+  --rl_per_dataset_cap 5000 \
   --output_dir ./output/qwen-med-pipeline
 
 # Unsloth GRPO
@@ -93,10 +96,27 @@ python scripts/train_unsloth_grpo.py \
   --dataset SLAKE_VQA_EN \
   --strict_image_split \
   --max_steps 200 \
+  --swanlab \
+  --swanlab_project medvlm-grpo \
+  --swanlab_experiment_name slake-seed3407 \
   --output_dir ./output/unsloth-grpo
 ```
 
-冷启动 JSONL 每行需包含 `image`、`question`、`reasoning` 和 `answer`，建议使用经临床审核的 reasoning。由于 `--strict_image_split` 会改变官方 benchmark 协议，官方划分与严格划分结果应分开报告。
+启用前先运行 `swanlab login`，或在无人值守环境中设置 `SWANLAB_API_KEY`。SwanLab
+会展示 Trainer 原生的 loss、learning rate、gradient norm、吞吐，以及 GRPO 的总奖励、
+奖励方差、KL、生成长度/截断率；Unsloth 入口还会上报语义正确性、流畅度、标签格式和
+推理长度等奖励分量。本地 `training_metrics.jsonl` 与 `reward_components.jsonl` 始终保留，
+不需要云端跟踪时省略 `--swanlab` 即可。
+
+默认配方按图像互斥地划分 OpenMedReason：10,000 条用于冷启动 SFT，1,000 条训练集样本用于验证，另取 30,000 条用于 RL；随后每个传统 VQA 训练集最多混入 5,000 条，仅作为 RL prompt 和答案 verifier，不会进入 SFT。OpenMedReason 官方 test 始终保留为最终测试。设置 `--openmedreason_rl_size 0` 可将其余合格训练图像全部放入 RL 池。`--cold_start_data` 仍可用包含 `image`、`question`、`reasoning`、`answer` 的 JSON/JSONL 覆盖默认冷启动集。
+
+训练前可运行仅检查元数据的资源估算器；它不会加载模型权重、解码训练图像或分配 CUDA tensor：
+
+```powershell
+python scripts/estimate_resources.py
+python scripts/estimate_resources.py --image-tokens 512 --completion-tokens 256
+python scripts/estimate_resources.py --json
+```
 
 ### 测试与结果
 
@@ -136,7 +156,7 @@ MedVLM-GRPO is a multimodal reinforcement-learning framework for Medical Visual 
 
 - SFT, GRPO, DAPO-style, and two-stage `SFT → DAPO` workflows;
 - LoRA/QLoRA, 4-bit quantization, gradient checkpointing, DeepSpeed, Unsloth, and vLLM;
-- VQA-RAD, SLAKE, PathVQA, MedVQA Agupte, and a GEMeX experiment recipe;
+- OpenMedReason cold-start plus a mixed-RL recipe using VQA-RAD, SLAKE, PathVQA, and MedVQA Agupte;
 - image-grouped splits, cross-split deduplication, and leakage auditing;
 - single-image inference, JSONL evaluation, training monitoring, and ablation scripts;
 - Exact Match and ROUGE-L metrics.
@@ -197,8 +217,11 @@ python scripts/audit_datasets.py --root ./data --output reports/dataset_audit.js
 python Qwentrain.py \
   --model_id Qwen/Qwen2.5-VL-3B-Instruct \
   --stage pipeline \
-  --cold_start_data ./dataset/cold_start.jsonl \
-  --strict_image_split \
+  --openmedreason_path ./data/neginb/OpenMedReason \
+  --cold_start_size 10000 \
+  --openmedreason_rl_size 30000 \
+  --recipe_validation_size 1000 \
+  --rl_per_dataset_cap 5000 \
   --output_dir ./output/qwen-med-pipeline
 
 # Unsloth GRPO
@@ -207,10 +230,35 @@ python scripts/train_unsloth_grpo.py \
   --dataset SLAKE_VQA_EN \
   --strict_image_split \
   --max_steps 200 \
+  --swanlab \
+  --swanlab_project medvlm-grpo \
+  --swanlab_experiment_name slake-seed3407 \
   --output_dir ./output/unsloth-grpo
 ```
 
-Each cold-start JSONL row must contain `image`, `question`, `reasoning`, and `answer`; clinician-reviewed reasoning is recommended. Since `--strict_image_split` changes the benchmark protocol, official-split and strict-split results should be reported separately.
+Run `swanlab login` first, or set `SWANLAB_API_KEY` for unattended jobs. SwanLab
+tracks the Trainer's loss, learning rate, gradient norm and throughput; GRPO
+reward/variance, KL, completion length and truncation; and the Unsloth reward
+components for semantic correctness, fluency, tag format and reasoning length.
+Local `training_metrics.jsonl` and `reward_components.jsonl` files remain the
+fallback. Omit `--swanlab` to keep cloud tracking disabled.
+
+The default pipeline uses an image-disjoint OpenMedReason recipe: 10k rows for
+cold-start SFT, 1k held-out training rows for validation, and 30k different rows
+for RL. The RL pool also includes up to 5k training rows from each configured
+answer-only VQA dataset. OpenMedReason's official test split remains untouched.
+Use `--openmedreason_rl_size 0` to place every remaining eligible OpenMedReason
+training image in the RL pool. `--cold_start_data` still accepts an external
+JSON/JSONL override with `image`, `question`, `reasoning`, and `answer` columns.
+
+Estimate resources from model and Parquet metadata without loading model
+weights, decoding training images, or allocating CUDA tensors:
+
+```powershell
+python scripts/estimate_resources.py
+python scripts/estimate_resources.py --image-tokens 512 --completion-tokens 256
+python scripts/estimate_resources.py --json
+```
 
 ### Tests and Results
 

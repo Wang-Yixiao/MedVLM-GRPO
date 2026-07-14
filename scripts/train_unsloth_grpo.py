@@ -22,6 +22,7 @@ from unsloth import FastVisionModel, is_bf16_supported
 from trl import GRPOConfig, GRPOTrainer
 
 from medvlm_grpo.data import load_medical_vqa
+from medvlm_grpo.tracking import make_swanlab_callback
 from medvlm_grpo.unsloth_pipeline.monitoring import GRPOMetricsCallback
 from medvlm_grpo.unsloth_pipeline.rewards import (
     RewardConfig,
@@ -52,6 +53,15 @@ def parse_args():
     parser.add_argument("--load_in_4bit", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--fast_inference", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--seed", type=int, default=3407)
+    parser.add_argument(
+        "--swanlab",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Stream Trainer and reward-component metrics to SwanLab.",
+    )
+    parser.add_argument("--swanlab_project", default="medvlm-grpo")
+    parser.add_argument("--swanlab_experiment_name", default=None)
+    parser.add_argument("--swanlab_workspace", default=None)
     return parser.parse_args()
 
 
@@ -120,7 +130,7 @@ def main():
         save_steps=50,
         save_total_limit=4,
         max_grad_norm=0.1,
-        report_to="none",
+        report_to="none",  # The explicit callback supplies names and config.
         bf16=is_bf16_supported(),
         fp16=not is_bf16_supported(),
         seed=args.seed,
@@ -129,13 +139,37 @@ def main():
         mask_truncated_completions=False,
     )
 
+    callbacks = [GRPOMetricsCallback(str(output_dir / "training_metrics.jsonl"))]
+    swanlab_callback = make_swanlab_callback(
+        enabled=args.swanlab,
+        project=args.swanlab_project,
+        experiment_name=args.swanlab_experiment_name,
+        workspace=args.swanlab_workspace,
+        config={
+            "model_id": args.model_id,
+            "dataset": args.dataset,
+            "max_steps": args.max_steps,
+            "max_seq_length": args.max_seq_length,
+            "max_prompt_length": args.max_prompt_length,
+            "max_completion_length": args.max_completion_length,
+            "num_generations": args.num_generations,
+            "gpu_memory_utilization": args.gpu_memory_utilization,
+            "reward_device": args.reward_device,
+            "seed": args.seed,
+            "algorithm": "dr_grpo",
+            "beta": 0.04,
+        },
+    )
+    if swanlab_callback is not None:
+        callbacks.append(swanlab_callback)
+
     trainer = GRPOTrainer(
         model=model,
         processing_class=processor,
         reward_funcs=[combine_reward_func],
         args=training_args,
         train_dataset=train_dataset,
-        callbacks=[GRPOMetricsCallback(str(output_dir / "training_metrics.jsonl"))],
+        callbacks=callbacks,
     )
     trainer.train()
 

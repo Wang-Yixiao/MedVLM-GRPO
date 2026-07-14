@@ -16,6 +16,6 @@ PRIVACY_ENV = {
 
 
 def disable_optional_telemetry() -> dict[str, str]:
-    """Disable anonymous statistics and optional experiment trackers."""
+    """Disable anonymous statistics and trackers not explicitly requested."""
     os.environ.update(PRIVACY_ENV)
     return PRIVACY_ENV.copy()

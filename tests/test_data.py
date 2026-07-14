@@ -1,68 +1,91 @@
-from pathlib import Path
+from datasets import Dataset
 
-from datasets import load_dataset
+import pytest
 
-from medvlm_grpo.data import load_experiment_datasets
+from medvlm_grpo.data import (
+    _drop_missing_encoded_images,
+    _normalize,
+    _take_image_groups,
+)
 
 
-def _normalize(value):
-    return " ".join(str(value).lower().strip().split())
-
-
-def test_local_experiment_recipe_loads_ten_unique_agupte_images():
-    if not Path("data/agupte/MedVQA").exists():
-        return
-    cold, train, validation, unseen = load_experiment_datasets()
-    raw_test = load_dataset("data/agupte/MedVQA", split="test")
-
-    # Reproduce the loader's deterministic first-question-per-image selection.
-    selected = []
-    seen = set()
-    for row in raw_test:
-        if row["image_names"] not in seen:
-            seen.add(row["image_names"])
-            selected.append(row)
-        if len(selected) == 10:
-            break
-
-    assert len(unseen) == 10
-    assert len({row["image_names"] for row in selected}) == 10
-    assert all(row["images"] is not None for row in selected)
-    assert all(row["questions"].strip() and row["answers"].strip() for row in selected)
-    assert len({row["ids"] for row in selected}) == 10
-
-    # agupte is evaluation-only: none of its rows are appended to mixed train.
-    assert len(cold) > 0
-    assert len(train) == len(cold) + 4919
-    assert len(validation) == 1053
-    assert unseen.column_names == ["image", "solution", "prompt", "messages"]
-    assert unseen[0]["image"] is not None
-    assert [row["answers"] for row in selected] == unseen["solution"]
-
-    mixed_train_qa = {
-        (
-            _normalize(prompt[-1]["content"][-1]["text"]),
-            _normalize(solution),
-        )
-        for prompt, solution in zip(train["prompt"], train["solution"])
+def test_openmedreason_tagged_target_is_not_nested():
+    row = {
+        "image": None,
+        "question": "Which option is correct?\nA. One\nB. Two",
+        "answer": "B",
+        "reasoning": "<think>The visible finding supports option B.</think><answer>B</answer>",
     }
-    assert not any(
-        (_normalize(row["questions"]), _normalize(row["answers"])) in mixed_train_qa
-        for row in selected
+
+    formatted = _normalize(row, "question", "answer")
+    completion = formatted["messages"][-1]["content"][0]["text"]
+
+    assert completion == row["reasoning"]
+    assert completion.count("<think>") == 1
+    assert completion.count("<answer>") == 1
+    assert formatted["solution"] == "B"
+
+
+def test_image_group_selection_never_splits_repeated_images():
+    dataset = Dataset.from_dict(
+        {
+            "_image_key": ["image-a", "image-a", "image-b", "image-c", "image-c"],
+            "question": ["q1", "q2", "q3", "q4", "q5"],
+        }
     )
 
-    print("\n=== agupte unseen test: 10 unique images ===")
-    for index, row in enumerate(selected):
-        image = row["images"]
-        print(
-            f"[{index:02d}] id={row['ids']} | image={row['image_names']} "
-            f"| size={image.size} | question={row['questions']} | answer={row['answers']}"
-        )
-    print("=== reliability checks ===")
-    print(f"rows={len(selected)} | unique_images={len(seen)}")
-    print("empty_question_or_answer=0 | duplicate_ids=0 | image_decode=OK")
-    print("exact_qa_overlap_with_mixed_train=0")
+    selected, remaining = _take_image_groups(
+        dataset,
+        ["image-a", "image-b", "image-c"],
+        target_rows=1,
+    )
 
-    # GEMeX must use its real `reason` field rather than the generic fallback.
-    assert cold[0]["messages"][-1]["content"][0]["text"].startswith("<think>")
-    assert "Review the relevant visible medical finding." not in cold[0]["messages"][-1]["content"][0]["text"]
+    # The target is one row, but the complete two-question image group is kept.
+    assert len(selected) == 2
+    assert set(selected["_image_key"]) == {"image-a"}
+    assert remaining == ["image-b", "image-c"]
+
+
+def test_nonpositive_group_target_selects_all_remaining_rows():
+    dataset = Dataset.from_dict({"_image_key": ["a", "b", "b"]})
+    selected, remaining = _take_image_groups(dataset, ["a", "b"], target_rows=0)
+
+    assert len(selected) == 3
+    assert remaining == []
+
+
+def test_missing_external_image_is_removed_before_decode(tmp_path):
+    existing = tmp_path / "existing.jpg"
+    existing.write_bytes(b"not decoded by this test")
+    dataset = Dataset.from_dict(
+        {
+            "image": [
+                {"bytes": b"embedded", "path": "embedded.jpg"},
+                {"bytes": None, "path": str(existing)},
+                {"bytes": None, "path": "missing.jpg"},
+            ],
+            "question": ["q1", "q2", "q3"],
+        }
+    )
+
+    with pytest.warns(RuntimeWarning, match="Dropping 1"):
+        filtered = _drop_missing_encoded_images(dataset, "test")
+
+    assert len(filtered) == 2
+    assert filtered["question"] == ["q1", "q2"]
+
+
+def test_image_lookup_does_not_touch_fallback_when_primary_exists():
+    class PrimaryOnly(dict):
+        def get(self, key, default=None):
+            if key == "images":
+                raise AssertionError("unused fallback was accessed")
+            return super().get(key, default)
+
+    formatted = _normalize(
+        PrimaryOnly(image=None, question="q", answer="a"),
+        "question",
+        "answer",
+    )
+
+    assert formatted["image"] is None
