@@ -69,6 +69,10 @@ def make_rl_config(args, output_dir, dapo=False):
     # Keep compatibility with both without passing an unknown dataclass field.
     if "max_prompt_length" in signature(GRPOConfig).parameters:
         common["max_prompt_length"] = args.max_prompt_length
+    if "generation_batch_size" in signature(GRPOConfig).parameters:
+        # TRL 0.29 defaults this to the training batch size (usually 1), but a
+        # complete GRPO group must contain num_generations candidates.
+        common["generation_batch_size"] = args.num_generations
     if dapo:
         common.update(
             # DAPO: token-level normalization and decoupled asymmetric clipping.
